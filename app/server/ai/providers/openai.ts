@@ -51,12 +51,16 @@ export class OpenAIProvider implements AIClient {
     const selectedRoute = request.task === 'job_match' ? 'llm-for-simple-task' : 'llm-for-complex-task';
     console.info(`[ai] Routing request for task "${request.task}" via Agent Gateway route "${selectedRoute}"`);
 
+    const processedSchema = request.jsonSchema
+      ? enforceNoAdditionalProperties(request.jsonSchema)
+      : undefined;
+
     const skills = buildSkillsSystemAppendix(request.task);
     const system =
       request.systemPrompt +
       skills +
       '\n\n' +
-      schemaInstruction(request.jsonSchema);
+      schemaInstruction(processedSchema);
 
     let modelToUse = this.model;
     if (process.env.GATEWAY_URL) {
@@ -70,13 +74,13 @@ export class OpenAIProvider implements AIClient {
           { role: 'system', content: system },
           { role: 'user', content: request.userPrompt },
         ],
-        response_format: request.jsonSchema
+        response_format: processedSchema
           ? {
               type: 'json_schema',
               json_schema: {
                 name: `${request.task}_response`,
                 strict: false,
-                schema: request.jsonSchema,
+                schema: processedSchema,
               },
             }
           : { type: 'json_object' },
@@ -100,13 +104,13 @@ export class OpenAIProvider implements AIClient {
               { role: 'system', content: system },
               { role: 'user', content: request.userPrompt },
             ],
-            response_format: request.jsonSchema
+            response_format: processedSchema
               ? {
                   type: 'json_schema',
                   json_schema: {
                     name: `${request.task}_response`,
                     strict: false,
-                    schema: request.jsonSchema,
+                    schema: processedSchema,
                   },
                 }
               : { type: 'json_object' },
@@ -128,5 +132,41 @@ export class OpenAIProvider implements AIClient {
       throw err;
     }
   }
+}
+
+function enforceNoAdditionalProperties(schema: any): any {
+  if (schema === null || typeof schema !== 'object') {
+    return schema;
+  }
+  const result = { ...schema };
+  if (result.type === 'object') {
+    if (result.additionalProperties === undefined) {
+      result.additionalProperties = false;
+    }
+  }
+  if (result.properties) {
+    const newProperties: Record<string, any> = {};
+    for (const key of Object.keys(result.properties)) {
+      newProperties[key] = enforceNoAdditionalProperties(result.properties[key]);
+    }
+    result.properties = newProperties;
+  }
+  if (result.items) {
+    if (Array.isArray(result.items)) {
+      result.items = result.items.map(enforceNoAdditionalProperties);
+    } else {
+      result.items = enforceNoAdditionalProperties(result.items);
+    }
+  }
+  if (result.anyOf) {
+    result.anyOf = result.anyOf.map(enforceNoAdditionalProperties);
+  }
+  if (result.allOf) {
+    result.allOf = result.allOf.map(enforceNoAdditionalProperties);
+  }
+  if (result.oneOf) {
+    result.oneOf = result.oneOf.map(enforceNoAdditionalProperties);
+  }
+  return result;
 }
 
