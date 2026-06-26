@@ -29,14 +29,25 @@ spec:
                   console.log("=== RECEIVED MASKED REQUEST BODY ===\n" + body + "\n====================================");
                   res.writeHead(200, { "Content-Type": "application/json" });
                   res.end(JSON.stringify({
+                    id: "chatcmpl-mock",
+                    object: "chat.completion",
+                    created: Math.floor(Date.now() / 1000),
+                    model: "mock-model",
                     choices: [
                       {
+                        index: 0,
                         message: {
                           role: "assistant",
                           content: JSON.stringify({ score: 5.0, explanation: "Check logs, masking works!", matchedJobs: [] })
-                        }
+                        },
+                        finish_reason: "stop"
                       }
-                    ]
+                    ],
+                    usage: {
+                      prompt_tokens: 10,
+                      completion_tokens: 10,
+                      total_tokens: 20
+                    }
                   }));
                 });
               }).listen(8089);

@@ -69,8 +69,12 @@ spec:
   target:
     name: openai-auth-secret
     creationPolicy: Owner
+    template:
+      engineVersion: v2
+      data:
+        Authorization: "Bearer {{ .openai_api_key }}"
   data:
-    - secretKey: Authorization
+    - secretKey: openai_api_key
       remoteRef:
         key: llm-secrets
         property: openai-api-key
@@ -127,9 +131,9 @@ spec:
           - name: claude-haiku
             anthropic:
               model: claude-haiku-4-5
-            host: mock-llm.jobmatch-dev.svc.cluster.local
-            port: 8089
-            path: /post
+#            host: mock-llm.jobmatch-dev.svc.cluster.local
+#            port: 8089
+#            path: /post
             policies:
               auth:
                 secretRef:

@@ -69,8 +69,12 @@ spec:
   target:
     name: openai-auth-secret
     creationPolicy: Owner
+    template:
+      engineVersion: v2
+      data:
+        Authorization: "Bearer {{ .openai_api_key }}"
   data:
-    - secretKey: Authorization
+    - secretKey: openai_api_key
       remoteRef:
         key: llm-secrets
         property: openai-api-key
