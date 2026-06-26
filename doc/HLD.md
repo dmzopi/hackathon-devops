@@ -400,3 +400,21 @@ The following metrics are collected from Envoy's Prometheus stats and visualized
 | **Prompt Injection Blocks**| `agentgateway_guardrail_checks_total` | Monitors the count of blocked malicious prompt injections or guardrail policy violations. |
 
 
+### 6.9 Multi-Provider Failover & High Availability (HA)
+
+To ensure high availability and protect against API rate limits or cloud outages, the platform implements a dual-tiered multi-provider failover architecture:
+
+1. **Gateway-Level Priority Groups & Eviction (Passive Health Checks):**
+   - In `AgentgatewayBackend` (both dev and prod overlays), LLM providers are divided into ordered priority groups representing primary and fallback options.
+   - Passive health check policies (`spec.policies.health`) monitor connection timeouts and response codes. If a provider fails to resolve/connect or returns `5xx`/`429` errors, it is evicted for `30s` (based on `consecutiveFailures: 1`).
+   - Subsequent client requests are automatically routed to the next healthy provider group. `modelAliases` (e.g. `claude-haiku-4-5: gemini-3.5-flash`) translate model names and request formats dynamically.
+
+2. **Application-Tier Client Fallback Retry:**
+   - In [openai.ts](../app/server/ai/providers/openai.ts), LLM completion requests are wrapped in try/catch blocks.
+   - If the primary gateway call fails (e.g., during active failover before the gateway eviction state propagates to all endpoints), the client intercepts the exception and issues a retry using the fallback model:
+     - **Complex Tasks:** `claude-haiku-4-5` $\rightarrow$ fallback to `gemini-3.5-flash`
+     - **Simple Tasks:** `gemini-2.5-flash-lite` $\rightarrow$ fallback to `gpt-5.4-nano`
+   - The retry request goes directly to the secondary provider group configured at the gateway level.
+
+
+

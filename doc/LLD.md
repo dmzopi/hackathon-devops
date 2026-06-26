@@ -339,18 +339,26 @@ spec:
 
 ### LLM Provider Fallback & Error Resilience Logic
 
-In high-reliability deployments, relying on a single upstream API provider introduces failure points (due to rate limits, service outages, or temporary DNS resolution issues). The JobMatch AI client layers handle fallback transitions automatically:
+In high-reliability deployments, relying on a single upstream API provider introduces failure points. The system implements a multi-level failover hierarchy to handle provider failures, gateway timeouts, and network outages:
 
-1. **Gateway Failover Routing (Envoy Active Failover - Proposed for Future Implementation):**
-   - *Planned Design:* The `AgentgatewayBackend` objects (`llm-for-simple-task` and `llm-for-complex-task`) will list primary and secondary backup endpoints in order of priority to enable automated gateway-level failover.
-   - *Current Limitation:* The current version of the Envoy-based Agent Gateway (v2.2.1) does not natively support dynamic, multi-provider active failover routing (e.g., automatically shifting traffic from Anthropic to Gemini on gateway-level `429` or `5xx` errors). Implementing this requires a major upstream version upgrade of the gateway platform.
-   - *Interim Setup:* In the current phase, provider failovers are handled at the application tier inside the `AIClient` and service layers.
+1. **Gateway-Level Priority Groups and Eviction (Passive Health Checks):**
+   - The `AgentgatewayBackend` resources (`llm-for-simple-task` and `llm-for-complex-task`) configure primary and backup providers as ordered priority groups.
+   - A passive health check policy (`spec.policies.health`) is applied at the gateway. If an endpoint encounters a connection timeout, a DNS resolution failure, or returns a `5xx`/`429` error, the gateway marks it as unhealthy and evicts it for `30s` (based on `consecutiveFailures: 1`).
+   - While the primary group is evicted, all subsequent requests automatically route to the healthy backup provider in the next group.
+   - Target fallback providers configure `modelAliases` (e.g. mapping `claude-haiku-4-5` to `gemini-3.5-flash` on the `gemini-flash` provider, or `gemini-2.5-flash-lite` to `gpt-5.4-nano` on the `openai-nano` provider) so that the gateway automatically translates the model names and API formats.
 
-2. **Application Backend Exception Fallbacks:**
-   - If the Envoy proxy returns an error envelope (e.g., standard JSON error structures showing proxy timeouts), the backend `AIClient` catches the exception inside the execution context.
-   - The service wrapper in `llm.ts` catches the promise rejection, logs the error status mapping (marked with the task context), and falls back to:
-     - **For CV Extraction:** Re-tries the request after stripping non-essential fields to fit target backups, or returns a structured error instructing the client to retry.
-     - **For Job Matching:** Catches LLM exceptions and falls back to a deterministic, rule-based matching score loop using local string intersection and keyword matching rules inside `synthesize.ts` (ensuring that users still receive search matches even during complete cloud API outages).
+2. **Application-Tier Client Fallback Retry:**
+   - Within the application [providers/openai.ts](../app/server/ai/providers/openai.ts), structured generations are wrapped in a try/catch block.
+   - If a request fails (such as the very first connection attempt during an outage, before the gateway's eviction logic has fully propagated the new endpoint states), the client catches the error, logs a warning, and immediately issues a fallback request using a module-level `FALLBACK_MODELS` mapping:
+     - `claude-haiku-4-5` $\rightarrow$ `gemini-3.5-flash`
+     - `gemini-2.5-flash-lite` $\rightarrow$ `gpt-5.4-nano`
+   - When the client issues the fallback request, the gateway routes it directly to the active secondary provider group matching that model name.
+
+3. **Deterministic Application Fallback (Outage Recovery):**
+   - If both the primary and fallback LLM gateways fail (e.g., during total cloud provider outages), the application's service layers catch the final exception:
+     - **For CV Extraction:** Fails with a descriptive user-facing message instructing them to retry, preventing silently corrupted partial extractions.
+     - **For Job Matching:** Automatically falls back to a deterministic, rule-based matching score loop using local string intersection and keyword matching rules inside `synthesize.ts` (ensuring that users still receive search matches even during complete cloud API outages).
+
 ```
 
 ---

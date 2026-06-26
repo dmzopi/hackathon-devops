@@ -22,6 +22,12 @@ spec:
         accessModes:
           - ReadWriteOnce
         size: 2Gi
+      grafana.ini:
+        server:
+          domain: grafana.scout.local
+          root_url: http://grafana.scout.local
+        live:
+          allowed_origins: http://grafana.scout.local
       service:
         type: ClusterIP
       sidecar:
@@ -41,6 +47,8 @@ spec:
     prometheus:
       enabled: true
       prometheusSpec:
+        routePrefix: /prometheus
+        externalUrl: http://grafana.scout.local/prometheus/
         podMonitorSelectorNilUsesHelmValues: false
         podMonitorNamespaceSelector: {}
       service:

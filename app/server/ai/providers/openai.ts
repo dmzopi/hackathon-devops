@@ -4,6 +4,11 @@ import { schemaInstruction, parseJsonFromModelText } from '../json.js';
 import { buildSkillsSystemAppendix } from '../skills/loader.js';
 import type { AIClient, LlmProviderId, StructuredGenerateRequest } from '../types.js';
 
+const FALLBACK_MODELS: Record<string, string> = {
+  'claude-haiku-4-5': 'gemini-3.5-flash',
+  'gemini-2.5-flash-lite': 'gpt-5.4-nano',
+};
+
 export class OpenAIProvider implements AIClient {
   readonly provider: LlmProviderId = 'openai';
   readonly model: string;
@@ -17,10 +22,35 @@ export class OpenAIProvider implements AIClient {
     this.client = new OpenAI({
       apiKey: config.openaiApiKey || 'mock-key',
       baseURL: resolvedBaseURL,
+      fetch: (async (url: any, init: any) => {
+        if (init && init.headers) {
+          if (typeof init.headers.delete === 'function') {
+            init.headers.delete('content-length');
+            init.headers.delete('Content-Length');
+          } else if (typeof init.headers === 'object') {
+            delete init.headers['content-length'];
+            delete init.headers['Content-Length'];
+          }
+        }
+        const response = await fetch(url, init);
+        if (!response.ok) {
+          try {
+            const cloned = response.clone();
+            const text = await cloned.text();
+            console.error(`[ai] RAW ERROR RESPONSE FROM LLM API (Status: ${response.status}):\n${text}\n`);
+          } catch (e) {
+            console.error('[ai] Failed to read raw error response body inside fetch interceptor:', e);
+          }
+        }
+        return response;
+      }) as any
     });
   }
 
   async generateStructured<T>(request: StructuredGenerateRequest): Promise<T> {
+    const selectedRoute = request.task === 'job_match' ? 'llm-for-simple-task' : 'llm-for-complex-task';
+    console.info(`[ai] Routing request for task "${request.task}" via Agent Gateway route "${selectedRoute}"`);
+
     const skills = buildSkillsSystemAppendix(request.task);
     const system =
       request.systemPrompt +
@@ -28,30 +58,75 @@ export class OpenAIProvider implements AIClient {
       '\n\n' +
       schemaInstruction(request.jsonSchema);
 
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: request.userPrompt },
-      ],
-      response_format: request.jsonSchema
-        ? {
-            type: 'json_schema',
-            json_schema: {
-              name: `${request.task}_response`,
-              strict: false,
-              schema: request.jsonSchema,
-            },
-          }
-        : { type: 'json_object' },
-    }, {
-      headers: {
-        'x-gateway-task-name': request.task,
-      }
-    });
+    let modelToUse = this.model;
+    if (process.env.GATEWAY_URL) {
+      modelToUse = request.task === 'job_match' ? 'gemini-2.5-flash-lite' : 'claude-haiku-4-5';
+    }
 
-    const text = response.choices[0]?.message?.content;
-    if (!text) throw new Error('Empty OpenAI response');
-    return parseJsonFromModelText<T>(text);
+    try {
+      const response = await this.client.chat.completions.create({
+        model: modelToUse,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: request.userPrompt },
+        ],
+        response_format: request.jsonSchema
+          ? {
+              type: 'json_schema',
+              json_schema: {
+                name: `${request.task}_response`,
+                strict: false,
+                schema: request.jsonSchema,
+              },
+            }
+          : { type: 'json_object' },
+      }, {
+        headers: {
+          'x-gateway-task-name': request.task,
+        }
+      });
+
+      const text = response.choices[0]?.message?.content;
+      if (!text) throw new Error('Empty OpenAI response');
+      return parseJsonFromModelText<T>(text);
+    } catch (err: any) {
+      const fallbackModel = FALLBACK_MODELS[modelToUse];
+      if (fallbackModel) {
+        console.warn(`[ai] Request failed with model "${modelToUse}"... Falling back to "${fallbackModel}"...`);
+        try {
+          const response = await this.client.chat.completions.create({
+            model: fallbackModel,
+            messages: [
+              { role: 'system', content: system },
+              { role: 'user', content: request.userPrompt },
+            ],
+            response_format: request.jsonSchema
+              ? {
+                  type: 'json_schema',
+                  json_schema: {
+                    name: `${request.task}_response`,
+                    strict: false,
+                    schema: request.jsonSchema,
+                  },
+                }
+              : { type: 'json_object' },
+          }, {
+            headers: {
+              'x-gateway-task-name': request.task,
+            }
+          });
+
+          const text = response.choices[0]?.message?.content;
+          if (!text) throw new Error('Empty OpenAI response');
+          return parseJsonFromModelText<T>(text);
+        } catch (fallbackErr: any) {
+          console.error(`[ai] generateStructured fallback failed: status=${fallbackErr.status} code=${fallbackErr.code} type=${fallbackErr.type} message="${fallbackErr.message}" parsedError=${JSON.stringify(fallbackErr.error)}`);
+          throw fallbackErr;
+        }
+      }
+      console.error(`[ai] generateStructured failed: status=${err.status} code=${err.code} type=${err.type} message="${err.message}" parsedError=${JSON.stringify(err.error)}`);
+      throw err;
+    }
   }
 }
+

@@ -7,16 +7,14 @@ resources:
   - external-secret.yaml
   - cluster-secret-store.yaml
   - agentgateway-config.yaml
-  - mcp-server.yaml
-  - jobmatch-agent.yaml
+ # - mcp-server.yaml
+ # - jobmatch-agent.yaml
   - agentgateway-policy.yaml
   - agentgateway-route.yaml
   - agentgateway-backend.yaml
   - mock-llm.yaml
-  - podmonitor.yaml
-  - prometheus-rbac.yaml
-  - grafana-repo.yaml 
-  - observability-routes.yaml
+  - jobmatch-ingress.yaml
+  - agentgateway-gui.yaml
 
 labels:
   - includeSelectors: true

@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jobmatch
+  namespace: jobmatch-prod
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: job.scout.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 3001
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: jobmatch-prod-web
+                port:
+                  number: 80

@@ -7,4 +7,16 @@ spec:
   logging:
     #level: "info,h2=info,rustls=info,agent_xds=info,store=info,agentgateway=debug"
     level: info
-    
+  service:
+    spec:
+      type: ClusterIP
+  rawConfig:
+    config:
+      adminAddr: "0.0.0.0:15000"
+  deployment:
+    spec:
+      template:
+        metadata:
+          labels:
+            environment: development
+

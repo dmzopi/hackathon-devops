@@ -53,6 +53,17 @@ async function runBoardTool(
       if (fetched.length > 0) return fetched;
     }
 
+    if (config.disableAiCrawlers) {
+      logs.push({
+        ...logBase,
+        tool: 'web_search_jobs',
+        status: 'ok',
+        found: 0,
+        message: 'AI web search fallback disabled via DISABLE_AI_CRAWLERS config',
+      });
+      return [];
+    }
+
     const fromWeb = await webSearchJobs(board, query, config.jobSearchResultsPerBoard);
     logs.push({
       ...logBase,

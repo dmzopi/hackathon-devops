@@ -143,6 +143,27 @@ describe('runJobSearchAgent', () => {
     expect(m.webSearchJobs).toHaveBeenCalledOnce();
   });
 
+  it('skips webSearchJobs when DISABLE_AI_CRAWLERS is true', async () => {
+    process.env.DISABLE_AI_CRAWLERS = 'true';
+    vi.resetModules();
+
+    const m = await mocks();
+    m.selectBoardsForCountry.mockReturnValue([BOARD_DOU]);
+    m.fetchJobBoard.mockResolvedValue([]);
+    m.webSearchJobs.mockResolvedValue([RAW_LISTINGS[0]!]);
+    m.rankListingsWithLlm.mockResolvedValue({ jobs: [], suggestions: [] });
+
+    const { runJobSearchAgent } = await import('../../agent/JobSearchAgent.js');
+    await expect(runJobSearchAgent(AGENT_INPUT)).rejects.toThrow(
+      'No job listings found'
+    );
+
+    expect(m.webSearchJobs).not.toHaveBeenCalled();
+
+    delete process.env.DISABLE_AI_CRAWLERS;
+    vi.resetModules();
+  });
+
   it('logs error status when a board tool throws, but continues', async () => {
     const m = await mocks();
     m.selectBoardsForCountry.mockReturnValue([BOARD_DOU, BOARD_DJINNI]);

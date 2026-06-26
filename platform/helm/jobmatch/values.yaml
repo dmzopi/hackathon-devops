@@ -7,7 +7,7 @@ api:
   enabled: true
   replicaCount: 1
   image:
-    repository: ghcr.io/mkdir28/jobmatch-api
+    repository: ghcr.io/dmzopi/jobmatch-api
     tag: v1.0.0-c001f8a-dev
     pullPolicy: IfNotPresent
   port: 3001
@@ -15,13 +15,14 @@ api:
   env:
     LLM_PROVIDER: "auto"
     SKILLS_DIR: "/app/skills"
+    DISABLE_AI_CRAWLERS: "false"
 
 # Web Service Configuration (Frontend)
 web:
   enabled: true
   replicaCount: 1
   image:
-    repository: ghcr.io/mkdir28/jobmatch-web
+    repository: ghcr.io/dmzopi/jobmatch-web
     tag: v1.0.0-c001f8a-dev
     pullPolicy: IfNotPresent
   port: 80

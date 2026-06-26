@@ -2,7 +2,7 @@
   "name": "job-match-api",
   "private": true,
   "type": "module",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "scripts": {
     "start": "node dist/index.js",
     "dev": "tsx watch index.ts",

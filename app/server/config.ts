@@ -48,4 +48,5 @@ export const config = {
   jobSearchConcurrency: Number(process.env.JOB_SEARCH_CONCURRENCY || 4),
   jobSearchResultsPerBoard: Number(process.env.JOB_SEARCH_RESULTS_PER_BOARD || 8),
   jobSearchFetchTimeoutMs: Number(process.env.JOB_SEARCH_FETCH_TIMEOUT_MS || 15000),
+  disableAiCrawlers: process.env.DISABLE_AI_CRAWLERS === 'true',
 } as const;

@@ -105,6 +105,15 @@ spec:
               auth:
                 secretRef:
                   name: openai-auth-secret
+              ai:
+                modelAliases:
+                  gemini-2.5-flash-lite: gpt-5.4-nano
+  policies:
+    health:
+      unhealthyCondition: "response.code >= 500 || response.code == 429"
+      eviction:
+        consecutiveFailures: 1
+        duration: 30s
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -114,17 +123,17 @@ metadata:
 spec:
   ai:
     groups:
-#      - providers:
-#          - name: claude-haiku
-#            anthropic:
-#              model: claude-haiku-4-5
-#            host: mock-llm.jobmatch-dev.svc.cluster.local
-#            port: 8089
-#            path: /post
-#            policies:
-#              auth:
-#                secretRef:
-#                  name: claude-auth-secret
+      - providers:
+          - name: claude-haiku
+            anthropic:
+              model: claude-haiku-4-5
+            host: mock-llm.jobmatch-dev.svc.cluster.local
+            port: 8089
+            path: /post
+            policies:
+              auth:
+                secretRef:
+                  name: claude-auth-secret
       - providers:
           - name: gemini-flash
             gemini:
@@ -137,3 +146,12 @@ spec:
               auth:
                 secretRef:
                   name: gemini-auth-secret
+              ai:
+                modelAliases:
+                  claude-haiku-4-5: gemini-3.5-flash
+  policies:
+    health:
+      unhealthyCondition: "response.code >= 500 || response.code == 429"
+      eviction:
+        consecutiveFailures: 1
+        duration: 30s

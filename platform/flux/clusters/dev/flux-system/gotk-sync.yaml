@@ -11,7 +11,7 @@ spec:
     branch: dev
   secretRef:
     name: flux-system
-  url: ssh://git@github.com/mkdir28/hackathon-devops.git
+  url: ssh://git@github.com/dmzopi/hackathon-devops
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization

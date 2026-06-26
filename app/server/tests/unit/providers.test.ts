@@ -171,6 +171,60 @@ describe('OpenAIProvider', () => {
     // Client was constructed without throwing — baseURL accepted
     expect((provider as any).client).toBeDefined();
   });
+
+  it('attempts failover to fallback model if primary model fails', async () => {
+    const { OpenAIProvider } = await import('../../ai/providers/openai.js');
+    const provider = new OpenAIProvider('claude-haiku-4-5');
+
+    let callCount = 0;
+    const createSpy = vi.spyOn((provider as any).client.chat.completions, 'create').mockImplementation(async (args: any) => {
+      callCount++;
+      if (callCount === 1) {
+        expect(args.model).toBe('claude-haiku-4-5');
+        throw new Error('Primary failed');
+      } else {
+        expect(args.model).toBe('gemini-3.5-flash');
+        return {
+          choices: [{ message: { content: '{"jobs":[],"suggestions":["fallback-ok"]}' } }],
+        } as any;
+      }
+    });
+
+    const result = await provider.generateStructured<{ jobs: unknown[]; suggestions: string[] }>({
+      ...BASE_REQUEST,
+      task: 'cv_extract',
+    });
+
+    expect(callCount).toBe(2);
+    expect(result.suggestions).toContain('fallback-ok');
+    createSpy.mockRestore();
+  });
+
+  it('sets dynamic models based on task in gateway mode', async () => {
+    process.env.GATEWAY_URL = 'http://gateway-test/v1';
+    const { OpenAIProvider } = await import('../../ai/providers/openai.js');
+    const provider = new OpenAIProvider('claude-haiku-4-5');
+
+    const createSpy = vi.spyOn((provider as any).client.chat.completions, 'create').mockResolvedValue({
+      choices: [{ message: { content: '{"jobs":[],"suggestions":[]}' } }],
+    });
+
+    // Simple task
+    await provider.generateStructured({
+      ...BASE_REQUEST,
+      task: 'job_match',
+    });
+    expect(createSpy.mock.calls[0]![0].model).toBe('gemini-2.5-flash-lite');
+
+    // Complex task
+    await provider.generateStructured({
+      ...BASE_REQUEST,
+      task: 'cv_extract',
+    });
+    expect(createSpy.mock.calls[1]![0].model).toBe('claude-haiku-4-5');
+
+    createSpy.mockRestore();
+  });
 });
 
 // GeminiProvider

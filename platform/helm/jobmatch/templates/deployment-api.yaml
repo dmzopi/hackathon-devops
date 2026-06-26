@@ -36,6 +36,8 @@ spec:
               value: "{{ .Values.api.env.LLM_PROVIDER }}"
             - name: SKILLS_DIR
               value: "{{ .Values.api.env.SKILLS_DIR }}"
+            - name: DISABLE_AI_CRAWLERS
+              value: "{{ .Values.api.env.DISABLE_AI_CRAWLERS }}"
             - name: GEMINI_API_KEY
               valueFrom:
                 secretKeyRef:
