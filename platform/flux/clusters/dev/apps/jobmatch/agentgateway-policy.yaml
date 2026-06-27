@@ -63,7 +63,7 @@ spec:
                 - "(?i).*system prompt.*"
                 - "(?i).*only (men|women|male|female).*"
                 - "(?i).*under 35.*"
-                - "(?i).*old|young*"
+                - "(?i).*\b(old|young)\b.*"
             response:
               message: "The response was rejected due to safety policy violations (Prompt Leakage or Discrimination detected)."
       prompt:
