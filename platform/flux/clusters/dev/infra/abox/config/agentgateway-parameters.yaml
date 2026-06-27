@@ -5,7 +5,7 @@ metadata:
   namespace: agentgateway-system
 spec:
   logging:
-    level: "info,llm=trace"
+    level: "trace"
   service:
     spec:
       type: ClusterIP
