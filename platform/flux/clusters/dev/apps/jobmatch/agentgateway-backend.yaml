@@ -114,7 +114,7 @@ spec:
                   gemini-2.5-flash-lite: gpt-5.4-nano
   policies:
     health:
-      unhealthyCondition: "response.code >= 500 || response.code == 429"
+      unhealthyCondition: "response.code >= 500 || response.code == 429 || response.code == 401"
       eviction:
         consecutiveFailures: 1
         duration: 30s
@@ -155,7 +155,7 @@ spec:
                   claude-haiku-4-5: gemini-3.5-flash
   policies:
     health:
-      unhealthyCondition: "response.code >= 500 || response.code == 429"
+      unhealthyCondition: "response.code >= 500 || response.code == 429 || response.code == 401"
       eviction:
         consecutiveFailures: 1
         duration: 30s

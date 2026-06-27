@@ -14,6 +14,7 @@ spec:
       codes:
         - 503
         - 429
+        - 401
       backoff: 200ms
     buffer:
       request: {}
