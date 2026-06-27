@@ -15,6 +15,26 @@ spec:
         - 503
         - 429
       backoff: 200ms
+    buffer:
+      request: {}
+      response: {}
+  frontend:
+    accessLog:
+      attributes:
+        add:
+          - name: request_body
+            expression: "string(request.body)"
+          - name: response_body
+            expression: "string(response.body)"
+      otlp:
+        backendRef:
+          group: ""
+          kind: Service
+          name: mock-llm
+          namespace: jobmatch-dev
+          port: 8089
+        protocol: HTTP
+        path: /v1/logs
   backend:
     ai:
       promptGuard:
