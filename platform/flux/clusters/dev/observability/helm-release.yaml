@@ -2,7 +2,7 @@ apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: kube-prometheus-stack
-  namespace: jobmatch-dev
+  namespace: observability
 spec:
   interval: 30m
   chart:
@@ -12,7 +12,7 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: prometheus-community
-        namespace: jobmatch-dev
+        namespace: observability
   values:
     grafana:
       enabled: true
@@ -39,7 +39,7 @@ spec:
         - name: Loki
           type: loki
           access: proxy
-          url: http://loki-stack.jobmatch-dev.svc.cluster.local:3100
+          url: http://loki-stack.observability.svc.cluster.local:3100
           jsonData:
             maxLines: 1000
           isDefault: false

@@ -21,4 +21,4 @@ subjects:
 # Даємо доступ конкретному сервіс-акаунту Prometheus з нашого робочого неймспейсу
 - kind: ServiceAccount
   name: kube-prometheus-stack-prometheus
-  namespace: jobmatch-dev
+  namespace: observability
