@@ -23,7 +23,7 @@ spec:
       replicaCount: 1
       image:
         repository: ghcr.io/dmzopi/jobmatch-api
-        tag: "v1.0.2-9f372f3"
+        tag: "v1.0.2-e9f17d6"
       env:
         LLM_PROVIDER: "auto"
         DISABLE_AI_CRAWLERS: "true"
@@ -31,7 +31,7 @@ spec:
       replicaCount: 1
       image:
         repository: ghcr.io/dmzopi/jobmatch-web
-        tag: "v1.0.2-9f372f3"
+        tag: "v1.0.2-e9f17d6"
     redis:
       enabled: true
       image:
