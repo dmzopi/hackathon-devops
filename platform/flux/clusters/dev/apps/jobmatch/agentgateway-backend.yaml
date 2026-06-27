@@ -117,7 +117,7 @@ spec:
       unhealthyCondition: "response.code >= 500 || response.code == 429 || response.code == 401"
       eviction:
         consecutiveFailures: 1
-        duration: 30s
+        duration: 90s
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -158,4 +158,4 @@ spec:
       unhealthyCondition: "response.code >= 500 || response.code == 429 || response.code == 401"
       eviction:
         consecutiveFailures: 1
-        duration: 30s
+        duration: 90s

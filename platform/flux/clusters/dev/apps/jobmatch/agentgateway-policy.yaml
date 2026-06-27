@@ -21,12 +21,12 @@ spec:
       response: {}
   frontend:
     accessLog:
-      attributes:
-        add:
-          - name: request_body
-            expression: "string(request.body)"
-          - name: response_body
-            expression: "string(response.body)"
+#      attributes:
+#        add:
+#          - name: request_body
+#            expression: "string(request.body)"
+#          - name: response_body
+#            expression: "string(response.body)"
       otlp:
         backendRef:
           group: ""
