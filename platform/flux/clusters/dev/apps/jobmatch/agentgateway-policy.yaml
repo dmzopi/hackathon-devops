@@ -44,6 +44,7 @@ spec:
                 - "(?i).*You are a secure Job Matching System.*"
                 - "(?i).*only (men|women|male|female).*"
                 - "(?i).*under 35.*"
+                - "(?i).*old|young*"
             response:
               message: "The response was rejected due to safety policy violations (Prompt Leakage or Discrimination detected)."
       prompt:
