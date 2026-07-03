@@ -214,6 +214,7 @@ The script will evaluate the test cases from `dataset.json` against these metric
 * **PII Masking:** Candidate personal information (emails, phone numbers, GitHub/LinkedIn links) is automatically masked or removed locally before being sent to the cloud. This can run either backend-side or at the `agentgateway` level using Guardrails.
 * **Prompt Injection Shield:** XML tags separate system instructions from user inputs. Regression tests ensure resilience against prompt injection.
 * **Secrets Management:** All LLM API keys are excluded from git and injected into Kubernetes using K8s Secrets / External Secrets Operator. At the `agentgateway` level, key proxying is configured (`secretRef`).
+* **Active Failover & Fallback Routing:** High Availability is built-in. If a provider API fails (e.g. rate limits, credentials, or server errors), the `AgentGateway` automatically evicts it for `90s` (detecting `>=500`, `429`, or `401` status codes) and redirects traffic to a healthy backup. If the gateway itself experiences a complete provider outage, the backend client handles recovery via catch-and-retry mapping tables (e.g. falling back from `claude-haiku` to `gemini-flash`).
 * **CI/CD Security Gates:** The pipeline includes a **Gitleaks** scan step to block commits with hardcoded secrets and checks prompt changes against the Evals test suite.
 
 ---

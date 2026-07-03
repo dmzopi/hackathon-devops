@@ -249,6 +249,7 @@ The infrastructure architecture of the JobMatch platform is designed to optimize
 | :--- | :--- | :--- |
 | **Compute VM** | GCP VM `e2-standard-2` (2 vCPUs, 8 GB RAM) | **GKE Autopilot** (Multi-zonal cluster node capacity) |
 | **K8s Runtime** | Local `k3d` cluster inside VM | **GKE Autopilot** managed environment |
+| **Relational Database** | PostgreSQL (local pod inside VM) | **GCP Cloud SQL for PostgreSQL** (managed, HA with replica) |
 | **Vector DB** | Qdrant (local pod inside VM) | Qdrant (ephemeral memory index pod / Qdrant Cloud) |
 | **Cache & DB** | Redis (local pod inside VM) | **GCP Memorystore for Redis** (managed basic tier) |
 | **Traffic Router** | Nginx Ingress Controller (local) | **Google Cloud Load Balancing (GCLB)** |
@@ -265,12 +266,78 @@ To minimize developer workstation resource load and cloud expenditures:
 
 ### 6.3 Production Environment Topology (Prod)
 
-The production infrastructure is built on managed Google Cloud Platform (GCP) services for maximum availability, scaling, and security:
+The production infrastructure is built on managed Google Cloud Platform (GCP) services for maximum availability, scaling, and security.
+
+#### Production Architecture Diagram
+
+![Production Architecture](drafts/gcp_production_architecture.png)
+
+#### Traffic & Data Interaction Flow (Mermaid)
+
+```mermaid
+graph TD
+    %% External Clients and DNS
+    Internet["🌐 Internet (Users / API Clients)"] -->|HTTPS / DNS| DNS["DNS (Google Cloud DNS)"]
+    DNS -->|Request| WAF["🛡️ Google Cloud Armor (WAF / DDoS protection)"]
+    WAF -->|Clean Traffic| GCLB["🔀 External HTTP(S) Load Balancer (GCLB)"]
+
+    %% VPC Network
+    subgraph VPC ["VPC: jobmatch-prod-vpc (10.0.0.0/16)"]
+        
+        %% Public Subnet for Ingress
+        subgraph PublicSubnet ["Public Subnet (10.0.1.0/24)"]
+            GCLB -->|Ingress Traffic| NGINX["Ingress Nginx Controller"]
+        end
+
+        %% Private Subnet for Compute & DBs
+        subgraph PrivateSubnet ["Private Subnet (10.0.2.0/19)"]
+            
+            %% Application Namespace
+            subgraph NamespaceApp ["Namespace: jobmatch-prod"]
+                NGINX -->|HTTP Route| Frontend["jobmatch-web (Pods)"]
+                NGINX -->|API Route| Backend["jobmatch-api (Pods)"]
+                Backend -->|Semantic Search| Qdrant["Qdrant Vector DB (Pods)"]
+                Backend -->|Transactional Data| DB["GCP Cloud SQL for PostgreSQL"]
+                DB <-->|Replication| DBReplica["PostgreSQL Replica (HA)"]
+            end
+
+            %% Security Gateway Namespace
+            subgraph NamespaceGW ["Namespace: agentgateway-system"]
+                Backend -->|LLM Requests (x-gateway-task-name)| EnvoyGW["AgentGateway (Envoy Pods)"]
+                EnvoyGW -->|Mask Name Webhook| Masker["pii-masker (Presidio API Pods)"]
+                ESO["External Secrets Operator"] -->|Syncs Keys| K8sSecrets["Target K8s Secrets"]
+            end
+
+            %% Caching
+            Backend -->|Read/Write Cache| Redis["Managed GCP Memorystore (Redis)"]
+            EnvoyGW -->|Mounts Keys| K8sSecrets
+        end
+    end
+
+    %% External GCP Resources
+    SecretManager["🔑 Google Secret Manager (GSM)"] -->| ESO Pulls Keys| ESO
+    Backend -->|Uploads Resumes| GCS["🗄️ Google Cloud Storage (Secure Bucket)"]
+
+    %% Outbound LLM Traffic
+    EnvoyGW -->|6. HTTPS Outbound with credentials| PublicNAT["Cloud NAT / Cloud Router"]
+    PublicNAT -->|7. API Call| CloudLLMs["Anthropic Claude / Google Gemini / OpenAI"]
+
+    classDef gcp fill:#1a73e8,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef sec fill:#d93025,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef k8s fill:#34a853,stroke:#fff,stroke-width:2px,color:#fff;
+    class GCLB,Redis,GCS,SecretManager,DNS,DB,DBReplica gcp;
+    class WAF,EnvoyGW,Masker sec;
+    class Frontend,Backend,Qdrant,ESO k8s;
+```
+
+#### Key Infrastructure Components:
+
 1. **Google Cloud Load Balancing (GCLB):** Public traffic lands on GCLB, terminating client SSL/TLS connections using managed certificates (TLS 1.2/1.3 only, weak ciphers disabled).
 2. **Google Cloud Armor:** Placed at the Load Balancer level, Cloud Armor provides L7 DDoS mitigation and WAF protections against exploit payloads.
 3. **GKE Autopilot:** A fully managed, multi-zonal Kubernetes runtime. GKE Autopilot manages node provisioning, configuration, upgrades, and operating system patching. Pods are running with at least 2 replicas spread across multiple availability zones.
 4. **GCP Memorystore for Redis:** Provides a reliable, managed in-memory cache for job search session data and API request caching.
 5. **Qdrant Vector DB:** Deployed as an ephemeral/stateless vector database on GKE (or Qdrant Cloud). Vector index data is rebuilt on startup from source stores, bypassing the operational complexity of GKE persistent disks.
+6. **GCP Cloud SQL for PostgreSQL:** A fully managed relational database service configured in High Availability (HA) mode with synchronous replication to a standby instance in a different availability zone, ensuring zero data loss and automated failover.
 
 ### 6.4 Scalability and Resource Limits
 
@@ -406,7 +473,7 @@ To ensure high availability and protect against API rate limits or cloud outages
 
 1. **Gateway-Level Priority Groups & Eviction (Passive Health Checks):**
    - In `AgentgatewayBackend` (both dev and prod overlays), LLM providers are divided into ordered priority groups representing primary and fallback options.
-   - Passive health check policies (`spec.policies.health`) monitor connection timeouts and response codes. If a provider fails to resolve/connect or returns `5xx`/`429` errors, it is evicted for `30s` (based on `consecutiveFailures: 1`).
+   - Passive health check policies (`spec.policies.health`) monitor connection timeouts and response codes. If a provider fails to resolve/connect or returns `>= 500`, `429`, or `401` status codes, it is evicted for `90s` (based on `consecutiveFailures: 1`).
    - Subsequent client requests are automatically routed to the next healthy provider group. `modelAliases` (e.g. `claude-haiku-4-5: gemini-3.5-flash`) translate model names and request formats dynamically.
 
 2. **Application-Tier Client Fallback Retry:**

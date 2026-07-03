@@ -64,7 +64,7 @@ graph TD
 1. **React/Vite Frontend (Web):** Клієнтська частина для завантаження резюме та введення пошукових запитів.
 2. **Backend API (Express):** Обробляє запити, запускає локальні парсери/скрапери вакансій (Фаза 1) та перенаправляє завдання агентам kagent через A2A (Фаза 2).
 3. **AI Client Layer ([AIClient.ts](../../app/server/ai/AIClient.ts)):** Уніфікований клієнт, що перенаправляє всі LLM запити на `AgentGateway`.
-4. **Agent Gateway ([AgentGateway](../../platform/flux/clusters/dev/apps/jobmatch/agentgateway-policy.yaml)):** Envoy-посередник для фільтрації Prompt Injection, маскування персональних даних (PII, як-от Email, телефони, SSN, посилання на LinkedIn/GitHub) та динамічного FinOps роутингу на основі типу задачі (через HTTP-заголовок `x-gateway-task-name`, який спрямовує `job_match` на дешеві моделі Gemini, а `cv_extract` — на Claude).
+4. **Agent Gateway ([AgentGateway](../../platform/flux/clusters/dev/apps/jobmatch/agentgateway-policy.yaml)):** Envoy-посередник для фільтрації Prompt Injection, маскування персональних даних (PII, як-от Email, телефони, SSN, посилання на LinkedIn/GitHub), динамічного FinOps роутингу на основі типу задачі (через HTTP-заголовок `x-gateway-task-name`, який спрямовує `job_match` на дешеві моделі Gemini, а `cv_extract` — на Claude), а також автоматичної відмовостійкості (Fallback Routing) — клієнтський та шлюзовий рівні забезпечують прозоре перенаправлення запитів на резервні моделі (`gpt-5.4-nano` для простих та `gemini-3.5-flash` для складних завдань) у випадку збоїв основного провайдера.
 5. **Declarative Agent (jobmatch-agent) (Фаза 2):** Спеціалізоване середовище виконання kagent для обробки промптів та взаємодії з MCP.
 6. **Memory (MCP + Qdrant) (Фаза 2):** MCP-сервер для семантичного пошуку збігів у векторній базі даних Qdrant.
 
@@ -238,6 +238,7 @@ graph TD
 | :--- | :--- | :--- |
 | **Базова хост-система** | GCP VM `e2-standard-2` (2 vCPU, 8 GB RAM) | **GKE Autopilot** (Multi-zonal) |
 | **Рантайм K8s** | Локальний кластер `k3d` у Docker | **GKE Autopilot** |
+| **Реляційна БД** | PostgreSQL (локальний pod) | **GCP Cloud SQL for PostgreSQL** (managed, HA з реплікою) |
 | **База даних векторів** | Qdrant (локальний pod) | Qdrant (ephemeral pod або Qdrant Cloud) |
 | **Кешування** | Redis (локальний pod) | **GCP Memorystore for Redis** (managed) |
 | **Маршрутизація трафіку**| Nginx Ingress Controller (локальний) | **Google Cloud Load Balancing (GCLB)** |
@@ -254,12 +255,78 @@ graph TD
 
 ### 6.3 Топологія промислового контуру (Prod)
 
-Промислове середовище спроектоване для забезпечення високої доступності (HA) та масштабованості:
+Промислове середовище спроектоване для забезпечення високої доступності (HA) та масштабованості. 
+
+#### Схема хмарної архітектури (Production Architecture)
+
+![Production Architecture](../drafts/gcp_production_architecture.png)
+
+#### Потік взаємодії компонентів у хмарі (Data & Traffic Flow)
+
+```mermaid
+graph TD
+    %% Зовнішні клієнти та DNS
+    Internet["🌐 Інтернет (Користувачі / API-клієнти)"] -->|HTTPS / DNS| DNS["DNS (Google Cloud DNS)"]
+    DNS -->|Запит| WAF["🛡️ Google Cloud Armor (WAF / DDoS protection)"]
+    WAF -->|Очищений трафік| GCLB["🔀 External HTTP(S) Load Balancer (GCLB)"]
+
+    %% Мережева VPC інфраструктура
+    subgraph VPC ["VPC: jobmatch-prod-vpc (10.0.0.0/16)"]
+        
+        %% Публічна підмережа (для Ingress)
+        subgraph PublicSubnet ["Public Subnet (10.0.1.0/24)"]
+            GCLB -->|Ingress Traffic| NGINX["Ingress Nginx Controller"]
+        end
+
+        %% Приватна підмережа (GKE + Database)
+        subgraph PrivateSubnet ["Private Subnet (10.0.2.0/19)"]
+            
+            %% Простір застосунку (Application Namespace)
+            subgraph NamespaceApp ["Namespace: jobmatch-prod"]
+                NGINX -->|HTTP Route| Frontend["jobmatch-web (Pods)"]
+                NGINX -->|API Route| Backend["jobmatch-api (Pods)"]
+                Backend -->|Семантичний пошук| Qdrant["Qdrant Vector DB (Pods)"]
+                Backend -->|Транзакційні дані| DB["GCP Cloud SQL for PostgreSQL"]
+                DB <-->|Реплікація| DBReplica["PostgreSQL Replica (HA)"]
+            end
+
+            %% Простір шлюзу безпеки (Security Gateway Namespace)
+            subgraph NamespaceGW ["Namespace: agentgateway-system"]
+                Backend -->|LLM Requests (x-gateway-task-name)| EnvoyGW["AgentGateway (Envoy Pods)"]
+                EnvoyGW -->|Mask Name Webhook| Masker["pii-masker (Presidio API Pods)"]
+                ESO["External Secrets Operator"] -->|Syncs Keys| K8sSecrets["Target K8s Secrets"]
+            end
+
+            %% Кешування
+            Backend -->|Read/Write Cache| Redis["Managed GCP Memorystore (Redis)"]
+            EnvoyGW -->|Mounts Keys| K8sSecrets
+        end
+    end
+
+    %% Зовнішні GCP сервіси
+    SecretManager["🔑 Google Secret Manager (GSM)"] -->| ESO Pulls Keys| ESO
+    Backend -->|Uploads Resumes| GCS["🗄️ Google Cloud Storage (Secure Bucket)"]
+
+    %% Вихідний хмарний трафік до LLM
+    EnvoyGW -->|6. HTTPS Outbound з ключами| PublicNAT["Cloud NAT / Cloud Router"]
+    PublicNAT -->|7. API Call| CloudLLMs["Anthropic Claude / Google Gemini / OpenAI"]
+
+    classDef gcp fill:#1a73e8,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef sec fill:#d93025,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef k8s fill:#34a853,stroke:#fff,stroke-width:2px,color:#fff;
+    class GCLB,Redis,GCS,SecretManager,DNS,DB,DBReplica gcp;
+    class WAF,EnvoyGW,Masker sec;
+    class Frontend,Backend,Qdrant,ESO k8s;
+```
+
+#### Ключові інфраструктурні компоненти:
+
 1. **Google Cloud Load Balancer (GCLB):** Приймає зовнішній трафік, здійснює термінацію SSL/TLS (забезпечує підтримку лише TLS 1.2/1.3) та перенаправляє запити до кластера GKE.
 2. **Google Cloud Armor:** Працює на рівні GCLB, забезпечуючи захист від DDoS-атак L7 та WAF-фільтрацію за правилами OWASP.
 3. **GKE Autopilot:** Мультизональний керований кластер Kubernetes, який автоматично масштабує обчислювальні ресурси (вузли) відповідно до вимог подів. Поди розгорнуті у двох репліках у різних зонах доступності.
 4. **GCP Memorystore for Redis:** Виділений керований сервіс кешування для збереження результатів пошуку та лімітів запитів.
 5. **Qdrant Vector DB:** Працює в бездержавному режимі (ephemeral memory index), дозволяючи швидко відновлювати індекс вакансій з основних джерел без використання складного збереження стану на дисках.
+6. **GCP Cloud SQL for PostgreSQL:** Керована реляційна база даних корпоративного рівня з налаштованою автоматичною реплікацією у реальному часі на резервну копію (Replica) в іншій зоні доступності для збереження профілів користувачів та метаданих з нульовим ризиком втрати інформації.
 
 ### 6.4 Ліміти ресурсів та масштабування подів
 
@@ -329,3 +396,75 @@ graph TD
 - **Зона B (Периметр WAF-безпеки):** Google Cloud Armor інтегрується безпосередньо з GCLB для фільтрації SQL-ін'єкцій, XSS та DDoS-атак L7. Він виступає першим бар'єром захисту до потрапляння пакетів у внутрішню мережу.
 - **Зона C (Ізольований обчислювальний кластер - GKE Autopilot):** Віртуальні машини та вузли працюють у приватних підмережах без публічних IP-адрес. Кордони кластера захищені за допомогою GKE Dataplane V2 NetworkPolicies, які ізолюють простір імен `jobmatch-prod` від інших сервісів та дозволяють трафіку надходити лише від Ingress-контролера.
 - **Зона D (Закритий рівень збереження даних):** Містить керовані системи збереження. Доступ до GCP Memorystore for Redis та GCP Secret Manager здійснюється виключно через приватні інтерфейси Private Service Connect (PSC) або VPC Peering зсередини Зони C. Будь-який прямий доступ з інтернету повністю заблоковано на рівні міжмережевого екрану GCP VPC.
+
+### 6.8 Архітектура спостережуваності та моніторингу (Observability & Monitoring Architecture)
+
+Для відстеження продуктивності, витрат та безпеки роботи AI-пошуку платформа впроваджує стандартизований стек спостережуваності на базі Prometheus, Loki, Promtail та Grafana.
+
+#### Схема потоків моніторингу та трафіку (Observability & Traffic Flow)
+Інфраструктура спостережуваності відстежує метрики й логи, а також надає інтерфейс Grafana за захищеним шляхом:
+1. **Метрики:** Збираються з проксі-шлюзу `AgentGateway` (на базі Envoy) у просторі імен `agentgateway-system` та надсилаються до Prometheus.
+2. **Логи:** Збираються агентом Promtail DaemonSet з усіх контейнерів у всіх просторах імен та пересилаються до Loki.
+3. **Ingress та маршрутизація:** Публічні HTTP-запити до `/grafana` проходять через Traefik Ingress, де проміжне програмне забезпечення (middleware) переписує шляхи перед надсиланням до Grafana.
+4. **Дзеркалювання трафіку (Traffic Mirroring):** Асинхронне копіювання (shadowing) 100% запитів до LLM з `AgentGateway` до `mock-llm` для постійного аудиту корисного навантаження (payloads) без впливу на затримку клієнта.
+
+```mermaid
+graph TD
+    User([Користувач у браузері]) -->|1. HTTP-запит до /grafana| Ingress["Traefik Ingress <br> (kube-prometheus-stack-grafana)"]
+    Ingress -->|2. Перехоплює та очищує префікс| Middleware["Traefik Middleware <br> (grafana-stripprefix)"]
+    Middleware -->|3. Routes to port 80| Grafana["Grafana Pod"]
+
+    subgraph "Namespace: agentgateway-system"
+        AGW["AgentGateway Proxy Pods <br> (app: agentgateway-external)"] -->|Експорт метрик Envoy| Endpoint["/stats/prometheus <br> (Port: metrics)"]
+        AGW -->|StdOut/Err логи| K8sLogs["Контейнерні логи K8s"]
+    end
+
+    subgraph "Namespace: jobmatch-dev"
+        Prom["Prometheus Operator <br> (kube-prometheus-stack)"] -->|Виявляє за селектором| PM["PodMonitor <br> (agentgateway-external-monitor)"]
+        PM -->|Збір метрик кожні 15с| Endpoint
+        Prom -->|Надає джерело метрик| Grafana
+        
+        Loki["Loki Stack <br> (Loki 5Gi Persistence)"] -->|Надає джерело логів isDefault: false| Grafana
+        Promtail["Promtail DaemonSet"] -->|Збирає логи контейнерів| K8sLogs
+        Promtail -->|Надсилає потоки логів| Loki
+        
+        Kust["Kustomize configMapGenerator"] -->|Створює з лейблом grafana_dashboard: '1'| CM[("ConfigMap: jobmatch-llm-dashboard <br> (містить dashboard.json)")]
+        GrafanaSidecar["Grafana Dashboard Sidecar"] -->|Автовизначення та імпорт| CM
+        GrafanaSidecar -->|Loads dashboard| Grafana
+        
+        MockLLM["Mock LLM Deployment <br> (mock-llm:8089)"] -->|Логує тіло здзеркаленого запиту| MockLogs["Container logs"]
+    end
+    
+    AGW -->|4. Mirrors 100% request traffic asynchronously| MockLLM
+    RefGrant["ReferenceGrant: allow-gateway-to-mock-llm"] -.->|Авторизує крос-спейс дзеркалювання| AGW
+    
+    PromSA["Prometheus ServiceAccount <br> (kube-prometheus-stack-prometheus)"] -.->|RBAC: RoleBinding| Role["Role: prometheus-k8s-allow-gateway <br> (в agentgateway-system)"]
+    PM -.->|Authorizes scraping| PromSA
+```
+
+#### Ключові метрики для моніторингу
+Наступні метрики збираються з Prometheus-статистики Envoy та візуалізуються на дашборді Grafana:
+
+| Група метрик | Назва метрики Envoy | Опис / Панель дашборду |
+| :--- | :--- | :--- |
+| **Обсяг запитів** | `agentgateway_requests_total` | Відстежує загальну кількість запитів через шлюз (візуалізується як частота запитів за останні 5 хв). |
+| **Затримка LLM** | `agentgateway_gen_ai_server_request_duration_sum` <br> `agentgateway_gen_ai_server_request_duration_count` | Розраховує середній час відповіді LLM за останні 5 хв (`sum / count`). |
+| **Споживання токенів**| `agentgateway_gen_ai_client_token_usage_sum` | Відстежує обсяг вхідних/вихідних токенів, спожитих під час роботи з LLM. |
+| **Блокування ін'єкцій**| `agentgateway_guardrail_checks_total` | Моніторить кількість заблокованих шкідливих спроб prompt injection або порушень правил guardrail. |
+
+### 6.9 Багатопровайдерна стійкість (Failover) та висока доступність (HA)
+
+Для забезпечення високої доступності та захисту від лімітів API (Rate Limits) чи хмарних збоїв, платформа використовує двокоординатну архітектуру автоматичного перемикання (failover):
+
+1. **Маршрутизація збоїв на рівні шлюзу (Gateway-Level Active Failover):**
+   - У ресурсах `AgentgatewayBackend` (як у dev, так і в prod контурах) провайдери LLM розділені на впорядковані пріоритетні групи, що представляють основні та резервні моделі.
+   - Пасивні перевірки здоров'я (`spec.policies.health`) моніторять таймаути та коди відповідей. Якщо провайдер повертає код `>= 500`, `429` або `401`, він вилучається з пулу на `90s` (на основі `consecutiveFailures: 1`).
+   - Наступні клієнтські запити автоматично перенаправляються на іншого здорового провайдера в групі, а правила `modelAliases` (наприклад, `claude-haiku-4-5: gemini-3.5-flash`) динамічно трансляють назву моделі та формат payload.
+
+2. **Клієнтський рівень стійкості (Application-Tier Client Fallback):**
+   - У прикладному коді бекенду [openai.ts](../app/server/ai/providers/openai.ts) всі виклики LLM огорнуті в блок `try/catch`.
+   - Якщо основний запит до шлюзу завершується помилкою (наприклад, до того, як інформація про вилучення провайдера поширилась по всіх репліках шлюзу), клієнт перехоплює помилку та робить повторну спробу (retry) з резервною моделлю:
+     - **Складні завдання:** `claude-haiku-4-5` $\rightarrow$ резерв на `gemini-3.5-flash`
+     - **Прості завдання:** `gemini-2.5-flash-lite` $\rightarrow$ резерв на `gpt-5.4-nano`
+   - Цей повторний запит спрямовується безпосередньо у відповідну резервну групу провайдерів на рівні шлюзу.
+

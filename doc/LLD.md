@@ -341,21 +341,49 @@ spec:
 
 In high-reliability deployments, relying on a single upstream API provider introduces failure points. The system implements a multi-level failover hierarchy to handle provider failures, gateway timeouts, and network outages:
 
-1. **Gateway-Level Priority Groups and Eviction (Passive Health Checks):**
-   - The `AgentgatewayBackend` resources (`llm-for-simple-task` and `llm-for-complex-task`) configure primary and backup providers as ordered priority groups.
-   - A passive health check policy (`spec.policies.health`) is applied at the gateway. If an endpoint encounters a connection timeout, a DNS resolution failure, or returns a `5xx`/`429` error, the gateway marks it as unhealthy and evicts it for `30s` (based on `consecutiveFailures: 1`).
-   - While the primary group is evicted, all subsequent requests automatically route to the healthy backup provider in the next group.
-   - Target fallback providers configure `modelAliases` (e.g. mapping `claude-haiku-4-5` to `gemini-3.5-flash` on the `gemini-flash` provider, or `gemini-2.5-flash-lite` to `gpt-5.4-nano` on the `openai-nano` provider) so that the gateway automatically translates the model names and API formats.
+1. **Gateway-Level Active Failover (Gateway Active Failover):**
+   - Resiliency at the Agent Gateway (Envoy) is declared via custom Kubernetes `AgentgatewayBackend` resource definitions ([agentgateway-backend.yaml](../../platform/flux/clusters/dev/apps/jobmatch/agentgateway-backend.yaml)) in the `agentgateway-system` namespace.
+   - Upstream backends are split into two task pools (`groups`):
+     - **`llm-for-simple-task` (Simple Tasks):** Primary — `gemini-lite` (`gemini-2.5-flash-lite`), Backup — `openai-nano` (`gpt-5.4-nano`).
+     - **`llm-for-complex-task` (Complex Tasks):** Primary — `claude-haiku` (`claude-haiku-4-5`), Backup — `gemini-flash` (`gemini-3.5-flash`).
+   - **Health Checking and Eviction Policies:** A passive health check policy detects failures:
+     ```yaml
+     policies:
+       health:
+         unhealthyCondition: "response.code >= 500 || response.code == 429 || response.code == 401"
+         eviction:
+           consecutiveFailures: 1
+           duration: 90s
+     ```
+     If the gateway encounters connection errors, a server error (`>= 500`), a rate limit status (`429`), or an unauthorized token error (`401`), it evicts that provider immediately for `90s` and redirects subsequent traffic to the healthy backup provider in the next priority group.
+   - **Model Mapping (Model Aliases):** By configuring `modelAliases`, the gateway dynamically translates requested model names to match the backup provider (e.g. replacing `claude-haiku-4-5` with `gemini-3.5-flash` when failing over to Google Gemini).
 
-2. **Application-Tier Client Fallback Retry:**
-   - Within the application [providers/openai.ts](../app/server/ai/providers/openai.ts), structured generations are wrapped in a try/catch block.
-   - If a request fails (such as the very first connection attempt during an outage, before the gateway's eviction logic has fully propagated the new endpoint states), the client catches the error, logs a warning, and immediately issues a fallback request using a module-level `FALLBACK_MODELS` mapping:
-     - `claude-haiku-4-5` $\rightarrow$ `gemini-3.5-flash`
-     - `gemini-2.5-flash-lite` $\rightarrow$ `gpt-5.4-nano`
-   - When the client issues the fallback request, the gateway routes it directly to the active secondary provider group matching that model name.
+2. **Client-Side Fallback Routing (Application-Tier Client Fallback):**
+   - If an error occurs before the gateway or if the gateway itself returns a provider exception, the Node.js backend handles this gracefully in the `OpenAIProvider` class ([openai.ts](../../app/server/ai/providers/openai.ts)).
+   - The backup model selection relies on a constant mapping table:
+     ```typescript
+     const FALLBACK_MODELS: Record<string, string> = {
+       'claude-haiku-4-5': 'gemini-3.5-flash',
+       'gemini-2.5-flash-lite': 'gpt-5.4-nano',
+     };
+     ```
+   - API calls are wrapped in `try/catch` blocks. When an exception occurs, the client logs a warning:
+     `[ai] Request failed with model "${modelToUse}"... Falling back to "${fallbackModel}"...`
+     and immediately retries the API request to `chat.completions.create` using the fallback model mapped in `FALLBACK_MODELS`.
 
-3. **Deterministic Application Fallback (Outage Recovery):**
-   - If both the primary and fallback LLM gateways fail (e.g., during total cloud provider outages), the application's service layers catch the final exception:
+#### Detailed Failover Request Lifecycle (Claude Outage Example)
+
+If the application issues a request with model `claude-haiku-4-5` but the `claude-haiku` provider is marked **Unhealthy** by the gateway:
+
+1. **Routing to Pool:** The Envoy-based Agent Gateway intercepts the HTTP request from the backend containing the `x-gateway-task-name: cv_extract` header and forwards it to the `llm-for-complex-task` pool as specified in [agentgateway-route.yaml](../../platform/flux/clusters/dev/apps/jobmatch/agentgateway-route.yaml).
+2. **Backup Routing:** Because the primary provider (`claude-haiku`) has been evicted due to an active health policy failure, Envoy immediately selects the next healthy provider in the backend group: `gemini-flash`.
+3. **Model Aliasing:** Envoy detects `"model": "claude-haiku-4-5"` in the request body and, using the defined `modelAliases`, translates it to `"model": "gemini-3.5-flash"`.
+4. **Auth Injection & Dispatch:** Envoy fetches the corresponding API key from `gemini-auth-secret` (stored in the `agentgateway-system` namespace), sets the `Authorization` header, and dispatches the request to the Google Gemini API.
+5. **Transparent Response:** Google Gemini returns a response, which Envoy forwards back to the Node.js backend as a successful `200 OK` response. The backend parses it normally without knowing a provider swap occurred.
+6. **Application Fallback (Last Line of Defense):** If the entire gateway fails or both providers in the group are down, the `OpenAIProvider` catches the exception in its `try/catch` wrapper and retries the request directly specifying `gemini-3.5-flash` in the next attempt.
+
+3. **Graceful Degradation (Outage Recovery):**
+   - If both the primary and fallback LLMs fail, the application's service layers catch the final exception:
      - **For CV Extraction:** Fails with a descriptive user-facing message instructing them to retry, preventing silently corrupted partial extractions.
      - **For Job Matching:** Automatically falls back to a deterministic, rule-based matching score loop using local string intersection and keyword matching rules inside `synthesize.ts` (ensuring that users still receive search matches even during complete cloud API outages).
 
