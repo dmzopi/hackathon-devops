@@ -1,0 +1,41 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infra-bootstrap
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  path: ./platform/flux/clusters/prod/infra
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  timeout: 2m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: scout-apps-bootstrap
+  namespace: flux-system
+spec:
+  interval: 2m0s
+  path: ./platform/flux/clusters/prod/apps/jobmatch
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  timeout: 2m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: observability-bootstrap
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  path: ./platform/flux/clusters/prod/observability
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  timeout: 2m

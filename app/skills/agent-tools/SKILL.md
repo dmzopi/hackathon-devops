@@ -18,7 +18,7 @@
 
 ## Requirements
 
-- A configured LLM provider (`OPENAI`, `GEMINI`, or `ANTHROPIC` key) with native web search
+- A configured LLM provider (`OPENAI`, `GEMINI`, or `ANTHROPIC` key) with native WEB search
 - `DEMO_MODE` must not be used for job search (no mock listings)
 
 ## Web search by provider
