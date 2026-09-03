@@ -48,9 +48,9 @@ coverage
 
 # Local development runtime files
 .pnpm-debug.log*
+package-lock.json
 package-lock.json.tmp
 yarn.lock.tmp
-
 
 doc/drafts
 

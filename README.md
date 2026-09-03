@@ -1,226 +1,184 @@
-# JobMatch Platform — AI-Powered Job Matching Engine
+# 🏆 DevOps Intensive Hackathon Solution — JobMatch (Scout AI Assistant)
 
-Welcome to the **JobMatch** platform repository — an intelligent job matching assistant based on AI agents, designed to demonstrate SRE, DevOps, GitOps, and AI safety practices (Prompt Security & Evals).
-
----
-
-## What is JobMatch?
-
-**JobMatch** is an AI-powered job search application designed as a teaching reference and sandbox for **DevOps/SRE workflows**, containerization (Docker/Docker Compose), and **Kubernetes** deployments. 
-
-## What the Code Does (Summary)
-
-This repository is an **AI-powered Job Search and Matching application** called **JobMatch**. It serves as a learning sandbox for DevOps and Kubernetes environments.
-
-- **CV Upload & Extraction**: Accepts PDF/text resumes on the frontend. The backend extracts text (using `pdf-parse` for PDFs) and uses structured LLM output to parse experience, education, skills, and summary.
-- **Agentic Job Search**: The user inputs queries and regional settings. The backend searches targeted job boards (e.g., `DOU.ua`, `Work.ua`, `Djinni.co`, `Remote OK`, etc.) from [job-boards.json](./app/server/data/job-boards.json) using native scrapers (`cheerio`) or triggers search APIs (Gemini/OpenAI/Claude web searches) as fallbacks.
-- **Scoring & Synthesis**: Integrates custom markdown-based instruction sets ("Agent Skills" under [skills/](./app/skills/)) into the LLM system prompt. The LLM ranks results based on a weighted matching model:
-  - Core Skill Overlap: **35%**
-  - Experience Fit: **20%**
-  - Domain Relevance: **20%**
-  - Gap Severity: **15%**
-  - Growth Potential: **10%**
-- **DevOps/SRE Sandbox**: Contains a Docker configuration (`Dockerfile`, `Dockerfile.api`, `docker-compose.yml`) structured to demonstrate deployment, reverse proxying, configuration maps, and Kubernetes deployment workflows.
-
-The application matches job seekers with target opportunities by parsing their uploaded resumes (CVs), performing web scraping and LLM-native search queries across selected regional and global job boards, and ranking the results using customized "Agent Skills" context-injected into the LLM prompt.
+> **Hackathon Solution Repository**: Complete platform engineering solution for the **DevOps Intensive Hackathon** task — transforming the **Scout AI Assistant** prototype into a production-grade, secure, and cost-effective cloud-native system with GitOps (FluxCD), CI/CD, automated LLM evaluation gates, PII protection, and FinOps budgeting.
 
 ---
 
-## 🏗️ Architecture Overview & Code Flow
+## 📋 Hackathon Task: Scout — Job Searcher AI Assistant
+
+<details open>
+<summary><b>Task Specification (from <a href="doc/hackathon-task.md">doc/hackathon-task.md</a>)</b></summary>
+
+### Context
+The Scout startup has just raised a seed round for its AI job search assistant: it reads CVs, matches job postings, and drafts cover letters. The demo to investors went brilliantly, running on the founder's laptop with a single hardcoded API key and the system prompt hidden in a code comment.
+
+Now, with the first 5,000 active users on the horizon, the legal team is nervous about GDPR, and the CFO just saw the first LLM provider invoice.
+
+The founders are hiring you as their DevOps/Platform engineering team. The Scout application works (more or less). Your job is to transform this prototype into a production-ready system that will scale under load, secure candidate resumes, and keep operational costs within budget.
+
+### Goal
+Build and demonstrate a prototype of a complete engineering loop (Harness) around this agentic AI application: from commit to production deployment, featuring built-in evaluation gates, PII protection, and FinOps budgeting.
+
+### Requirements & Scope
+*Example repo: [devops-sre-job-match-app-example](https://github.com/GregoryKoshelenko/devops-sre-job-match-app-example)*
+
+1. **SDLC & "How to Build"**: Monorepo structure (`app/`, `platform/`, `evals/`), CI workflow (lint → unit tests → build → push images), CD workflow (FluxCD/ArgoCD reconciling cluster state on main merge), environment promotion (dev → staging → prod), versioned prompts & skills (`SKILL.md`) evaluated on PR.
+2. **Harness Engineering**: Memory (candidate profiles + vector store job cache), skills (`SKILL.md` capability footprints), MCP (Model Context Protocol) tool integration.
+3. **Testing**: Unit and integration tests for request formatting, tool calls, retries, and timeouts.
+4. **Eval Suite (`evals/`)**: Test cases for ranking and cover letter quality, LLM-as-a-Judge CI gate (blocks PR if score < baseline), regression datasets for prompt injection and PII leaks.
+5. **Security**: Prompt injection defense (XML context boundary), PII minimization/data governance, secrets management via gateway proxy (AgentGateway / ESO), signed images/digests, output guardrails.
+6. **Hosting & AI Providers**: Multi-provider support (Claude, Gemini, OpenAI) to prevent vendor lock-in; price comparison per 1M tokens.
+7. **FinOps Model**: Cost projection (5,000 users, 20 searches/month, ~3K input + ~800 output tokens) and unit metric: cost-per-active-user.
+
+</details>
+
+### Deliverables & Documentation Matrix
+
+| Required Deliverable | Description | Implementation Link |
+|---|---|---|
+| **1. ADR** | Architectural Decision Records justifying design, model choices, and FinOps | 📑 **[doc/ADR.md](doc/ADR.md)** |
+| **2. HLD** | High-Level Solution Design (components, lifecycles, K8s deployment) | 📐 **[doc/HLD.md](doc/HLD.md)** |
+| **3. LLD** | Low-Level Design (code architecture, schemas, testing, CI/CD/GitOps) | 🔧 **[doc/LLD.md](doc/LLD.md)** |
+| **4. Task Spec** | Original hackathon challenge statement and deliverables criteria | 📋 **[doc/hackathon-task.md](doc/hackathon-task.md)** |
+| **5. GCP Dev Setup** | Step-by-step setup for GCP dev environment & FluxCD platform launch | ☁️ **[doc/manuals/gcp-dev-setup.md](doc/manuals/gcp-dev-setup.md)** |
+| **6. Ukrainian Docs** | Full Ukrainian translations for architecture documentation | 🇺🇦 **[doc/ukr/](doc/ukr/)** |
+| **7. Code & Manifests** | Full application, platform manifests, evals, scripts, and GitOps overlays | [`app/`](app/), [`platform/`](platform/), [`evals/`](evals/), [`scripts/`](scripts/) |
+
+---
+
+## 💡 Solution Overview & Core Features
+
+**JobMatch** is the production-ready implementation of the Scout AI assistant:
+
+* 📄 **CV Ingestion & Extraction**: Accepts PDF/text resumes, extracts content via `pdf-parse`, and generates structured candidate profiles using LLMs.
+* 🔍 **Agentic Job Search**: Queries regional boards (`DOU.ua`, `Work.ua`, `Djinni.co`, `Remote OK`) via native scrapers (`cheerio`) with automatic fallback to LLM web search APIs.
+* ⚖️ **Weighted Scoring & Cover Letters**: Injects versioned Agent Skills ([`app/skills/`](app/skills/)) to rank jobs (35% skills, 20% experience, 20% domain fit, 15% gap severity, 10% growth) and drafts personalized cover letters.
+* 🛡️ **Active Gateway Routing & Fallback**: `AgentGateway` manages credentials, enforces rate limits, scrubs PII, and performs automatic failover between LLM providers (e.g. Claude Haiku ↔ Gemini Flash) with 90s circuit-breaker eviction.
+
+---
+
+## 🏗️ Architecture & Code Flow
 
 ```mermaid
 graph TD
-    %% Frontend Subsystem
     subgraph Frontend [React-Vite Client]
         Home[Home.tsx]
         Form[SearchForm.tsx]
         Dropzone[CVDropzone.tsx]
         Results[ResultsList.tsx]
-        Theme[ThemeContext.tsx]
     end
 
-    %% Backend Subsystem
-    subgraph Backend [Express.js API Server]
-        Index[index.ts]
+    subgraph Backend [Express API Server]
         RouterFiles[routes/files.ts]
         RouterJobs[routes/jobs.ts]
-        Config[config.ts]
-        
-        %% Services
         CVService[services/cv.ts]
-        LLMService[services/llm.ts]
-        
-        %% AI Core
-        AIClient[ai/AIClient.ts]
-        Gemini[ai/providers/gemini.ts]
-        OpenAI[ai/providers/openai.ts]
-        Claude[ai/providers/claude.ts]
-        Demo[ai/providers/demo.ts]
-        
-        %% Agent
         Agent[agent/JobSearchAgent.ts]
-        Boards[agent/boards.ts]
         Synthesize[agent/synthesize.ts]
-        
-        %% Agent Tools
-        ToolFetch[agent/tools/fetch-board.ts]
-        ToolSearch[agent/tools/web-search.ts]
-        Parsers[agent/tools/parsers.ts]
+        AIClient[ai/AIClient.ts]
     end
     
-    %% Storage & Config
-    subgraph External [External Resources & Files]
-        JobBoardsJSON[(server/data/job-boards.json)]
+    subgraph External [External Resources & Gateways]
+        JobBoards[(server/data/job-boards.json)]
         SkillsFolder[(skills/)]
-        LLMApis[LLM Providers API]
+        AgentGateway[AgentGateway / LLM Providers]
     end
 
-    %% Frontend to Backend Flows
-    Home -->|Upload file| RouterFiles
-    Home -->|Extract CV data / Match jobs| RouterJobs
-    RouterFiles -->|Parses PDF/Text| CVService
-    RouterFiles -->|LLM Structured CV Output| LLMService
-    RouterJobs -->|Initiate Agentic Match| LLMService
-
-    %% LLMService Logic
-    LLMService -->|Task: cv_extract| AIClient
-    LLMService -->|Task: job_match| Agent
-    
-    %% Agent Logic
-    Agent -->|1. Filter & Select Boards| Boards
-    Boards -->|Loads database| JobBoardsJSON
-    Agent -->|2. Concurrent Tool Queries| ToolFetch
-    Agent -->|2. Fallback Web Search| ToolSearch
-    
-    %% Tool execution details
-    ToolFetch -->|Cheerio Parse HTML| Parsers
-    ToolSearch -->|Google, OpenAI, or Claude Search APIs| ToolSearch
-    
-    %% Synthesis
-    Agent -->|3. Rank & Score Results| Synthesize
-    Synthesize -->|Injects Agent Skills| SkillsFolder
-    Synthesize -->|Mime-Type JSON Structure| AIClient
-    AIClient -->|Invokes provider API| Gemini & OpenAI & Claude & Demo
-    Gemini & OpenAI & Claude -->|Send prompt + schema| LLMApis
+    Home -->|Upload CV| RouterFiles -->|Extract| CVService -->|Structured CV| AIClient
+    Home -->|Search Jobs| RouterJobs -->|Run Agent| Agent
+    Agent -->|1. Scrape Boards| JobBoards
+    Agent -->|2. Score & Rank| Synthesize
+    Synthesize -->|Inject Skills| SkillsFolder
+    Synthesize -->|Generate Cover Letters| AIClient
+    AIClient -->|Managed Requests & Fallback| AgentGateway
 ```
-
-### Layered View
-
-* **Presentation Layer (`app/src/`):** React UI components, CSS styles, internationalization, and HTTP API clients.
-* **API Layer (`app/server/routes/`):** Express endpoints handles uploads (`/api/files`), CV parsing, and job matching loops.
-* **Service Layer (`app/server/services/`):** Orchestrator logic connecting uploads parsing with `JobSearchAgent`.
-* **Agent Layer (`app/server/agent/`):** Decides targets, scrapes HTML contents via Cheerio, and synthesizes candidate scoring weights.
-* **AI Provider Layer (`app/server/ai/`):** Abstraction singleton supporting dynamic prompt skills injection.
-* **Platform Layer (`platform/`):** Helm charts, Envoy configurations, and FluxCD deployments.
 
 ---
 
 ## 📂 Monorepo Structure
 
-The repository is built as a monorepo with clear separation of concerns:
-
 ```
 ├── app/                      # Application zone
 │   ├── src/                  # React/Vite SPA frontend
-│   ├── server/               # Node.js Express API & Worker (JobSearchAgent)
-│   ├── skills/               # Versioned agent skills (flat markdown)
-│   └── prompts/              # System prompts and templates of LLM roles
+│   ├── server/               # Node.js Express API & Agent worker
+│   ├── skills/               # Versioned agent skills (markdown)
+│   └── prompts/              # LLM system prompts and templates
 ├── platform/                 # Infrastructure zone (GitOps)
-│   ├── flux/                 # FluxCD configuration
-│   │   └── clusters/         # Separated cluster configurations per environment
-│   │       ├── dev/          # Dev environment settings (Namespace jobmatch-dev, branch dev)
-│   │       └── prod/         # Prod environment settings (Namespace jobmatch-prod, branch main)
-│   └── helm/                 # Local Umbrella Helm Chart (Redis, Qdrant)
-├── evals/                    # Evaluation zone (Quality Gate)
-│   ├── dataset.json          # Golden dataset (including security test cases)
-│   └── run-evals.mjs         # LLM-as-a-Judge evaluation execution script
-├── doc/                      # Project documentation
-│   ├── archive/              # Legacy reference guides
-│   ├── manuals/              # Developer guides & manuals
-│   ├── ukr/                  # Ukrainian translations (ADR, HLD, LLD)
-│   ├── ADR.md                # Architectural Decision Records
-│   ├── HLD.md                # High-Level Solution Design
-│   └── LLD.md                # Low-Level Design
+│   ├── flux/                 # FluxCD cluster configs (dev & prod overlays)
+│   └── helm/                 # Helm charts (AgentGateway, Redis, Qdrant)
+├── evals/                    # Quality Gate zone
+│   ├── dataset.json          # Golden test cases (relevance, tone, security)
+│   └── run-evals.mjs         # LLM-as-a-Judge evaluation runner
+├── scripts/                  # Developer tooling & synchronization scripts
+│   ├── pre-commit            # Gitleaks pre-commit hook to block secret leaks
+│   └── sync-skills.sh        # Syncs agent skills into Helm chart packaging
+└── doc/                      # Documentation (ADR, HLD, LLD, Task, Translations)
 ```
 
 ---
 
-## 🚀 Quick Start Locally
+## 🚀 Quick Start
 
-### 1. Prerequisites
-You will need **Node.js v20+** and **Docker / Docker Compose** installed.
-
-### 2. Install Dependencies
-```bash
-# Install dependencies for frontend and backend
-npm install
-npm install --prefix app/server
-```
-
-### 3. Environment Variables Configuration
-Create a `.env` file in the `app/` directory based on `.env.example`:
-```bash
-cp app/.env.example app/.env
-```
-Open `app/.env` and add at least one LLM provider API key (e.g., `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`).
-
-### 4. Build the Backend
-To compile the TypeScript backend:
-```bash
-cd app/server
-npm run build
-```
-
-### 5. Run in Development Mode
-```bash
-# From the repository root
-npm run dev
-```
-* **Frontend UI:** http://localhost:5173
-* **Backend API Health:** http://localhost:3001/api/health
+### Prerequisites
+* **Node.js v20+**
+* **Docker & Docker Compose** (for containerized deployment)
+* LLM provider API key *(optional — runs in **Demo Mode** with sample data if omitted)*
 
 ---
 
-## 🛠️ Docker Deployment
-To run the full stack in Docker containers locally:
+### Step 1: Configuration
+Navigate to the application folder and initialize your environment file:
 ```bash
 cd app
+cp .env.example .env
+```
+
+### Step 2: Choose How to Run
+
+#### Option A: Run with Docker (Recommended)
+```bash
+# From within the app/ directory:
 docker compose up --build
 ```
-The web interface will be available at http://localhost:8080.
+* **Web Interface**: [http://localhost:8080](http://localhost:8080)
+
+#### Option B: Run Locally (Development Mode)
+```bash
+# From within the app/ directory:
+
+# 1. Install dependencies for web client and API server
+npm install && npm install --prefix server
+
+# 2. Build TypeScript backend and compile job catalogs
+(cd server && npm run build)
+
+# 3. Start API and frontend dev servers concurrently
+npm run dev
+```
+* **Frontend UI**: [http://localhost:5173](http://localhost:5173)
+* **Backend API Health**: [http://localhost:3001/api/health](http://localhost:3001/api/health)
+
+#### Option C: Deploy Dev Environment to GCP (GitOps)
+Follow the step-by-step setup in ☁️ **[GCP Dev Environment Setup Guide](doc/manuals/gcp-dev-setup.md)**:
+1. Provision a single GCP `e2-standard-2` VM running `k3s` (~$48/month topology).
+2. Store LLM API keys in **Google Secret Manager** & grant IAM access to External Secrets Operator.
+3. Bootstrap the cluster using **FluxCD** against `./platform/flux/clusters/dev`.
 
 ---
 
-## 🧪 Running Evals (Quality Gate)
-The Evals zone evaluates the job matching quality and cover letter generation using the LLM-as-a-Judge pattern.
+## 🧪 Quality & Security Gates
 
+### Evaluation Suite (`evals/`)
+Evaluates matching quality, tone, and guardrails via the **LLM-as-a-Judge** pattern:
 ```bash
-# Navigate to the evals folder and run
 cd evals
 npm install
 npm test
 ```
-The script will evaluate the test cases from `dataset.json` against these metrics:
-* **Relevance**
-* **Tone** (of the cover letter)
-* **Hallucination-free**
-* **Safety-guardrails** (checks for prompt leakage and discrimination patterns)
+* **CI Gate**: Triggered on changes to `skills/` or `prompts/`. Pull requests are blocked if the average score falls below **4.2 / 5.0** or if any safety check fails.
+* **Evaluated Metrics**: Relevance, Tone, Hallucination-free, and Safety/Guardrails (prompt leaks and bias).
 
-*Note: In the CI/CD pipeline, the evaluation runs conditionally — on pushes and pull requests to both `dev` and `main` branches when skills/prompts files are modified. If the average score falls below `4.2/5.0` or a security gate fails, the pipeline fails.*
-
----
-
-## 🛡️ Security Controls
-* **PII Masking:** Candidate personal information (emails, phone numbers, GitHub/LinkedIn links) is automatically masked or removed locally before being sent to the cloud. This can run either backend-side or at the `agentgateway` level using Guardrails.
-* **Prompt Injection Shield:** XML tags separate system instructions from user inputs. Regression tests ensure resilience against prompt injection.
-* **Secrets Management:** All LLM API keys are excluded from git and injected into Kubernetes using K8s Secrets / External Secrets Operator. At the `agentgateway` level, key proxying is configured (`secretRef`).
-* **Active Failover & Fallback Routing:** High Availability is built-in. If a provider API fails (e.g. rate limits, credentials, or server errors), the `AgentGateway` automatically evicts it for `90s` (detecting `>=500`, `429`, or `401` status codes) and redirects traffic to a healthy backup. If the gateway itself experiences a complete provider outage, the backend client handles recovery via catch-and-retry mapping tables (e.g. falling back from `claude-haiku` to `gemini-flash`).
-* **CI/CD Security Gates:** The pipeline includes a **Gitleaks** scan step to block commits with hardcoded secrets and checks prompt changes against the Evals test suite.
-
----
-
-## 📖 Detailed Architecture Documents
-
-* 📑 **[Architectural Decision Records (ADR)](doc/ADR.md)** — Architectural choices justification, FinOps analysis, model selection, and unit cost calculations.
-* 📐 **[High-Level Solution Design (HLD)](doc/HLD.md)** — System architecture, Agent life cycle, and deployment diagrams in Kubernetes.
-* 🔧 **[Low-Level Design (LLD)](doc/LLD.md)** — Granular code architecture mapping, API request/response schemas, testing suite specifications, and CI/CD/GitOps operations.
+### Security Controls
+* **PII Masking**: Candidate emails, phones, and profile links are scrubbed locally before external LLM calls.
+* **Prompt Injection Shield**: Strict XML tag delimiters isolate untrusted user inputs from system instructions.
+* **Secrets Governance**: Zero plaintext credentials in Git; secrets managed via External Secrets Operator / AgentGateway `secretRef`.
+* **CI Scans**: Automated **Gitleaks** secret detection on every commit.
